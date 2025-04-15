@@ -1,27 +1,39 @@
 import express from 'express';
-import { approveUser, approveCustomer, generateCard, freezeAccount, unfreezeAccount, deactivateAccount, approveLoan, rejectLoan, getLoanApplications, getTransactions } from '../controllers/adminController.js';
+import { approveUser, approveCustomer,  freezeAccount, unfreezeAccount, deactivateAccount, approveLoan, rejectLoan, getLoanApplications, getTransactions, getAdminSummary, getAllCustomers, getCustomerDetails, blockATMCard, loginAdmin, reactivateAccount } from '../controllers/adminController.js';
 import { adminOnly } from '../middlewares/roleMiddleware.js';
+import { protect } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.post('/approve/:userId', adminOnly, approveUser);
 
-router.post("/approve/:customerId", adminOnly, approveCustomer);
+router.post('/login', loginAdmin);//
 
-router.post("/generate-card/:accountId", adminOnly, generateCard);
+// router.post('/approve/:userId',protect, adminOnly, approveUser);
 
-router.put('/approveloan/:loan_id', adminOnly, approveLoan);
+router.post("/approve/:customerId",protect, adminOnly, approveCustomer);//
 
-router.put('/freeze', adminOnly, freezeAccount);
+router.put('/approveloan/:loan_id',protect, adminOnly, approveLoan);//
 
-router.put('/unfreeze', adminOnly, unfreezeAccount);
+router.put('/freeze',protect, adminOnly, freezeAccount);//
 
-router.put('/deactivate', adminOnly, deactivateAccount);
+router.put('/unfreeze',protect, adminOnly, unfreezeAccount);//
 
-router.get('/loan-applications', adminOnly, getLoanApplications);
+router.put('/deactivate',protect, adminOnly, deactivateAccount);//
 
-router.patch('/rejectloan/:id', adminOnly, rejectLoan);
+router.put('/reactivate',protect, adminOnly, reactivateAccount);//
 
-router.get('/transactions', adminOnly, getTransactions);
+router.get('/loanapplications',protect, adminOnly, getLoanApplications);//
+
+router.patch('/rejectloan/:id',protect, adminOnly, rejectLoan);//
+
+router.get('/transactions',protect, adminOnly, getTransactions);
+
+router.get('/summary',protect, adminOnly, getAdminSummary);//
+
+router.get('/customers',protect, adminOnly, getAllCustomers);//
+
+router.get('/customer/:id',protect, adminOnly, getCustomerDetails);//
+
+router.put('/card/block/:id',protect, adminOnly, blockATMCard);
 
 export default router;

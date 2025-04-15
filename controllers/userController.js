@@ -3,21 +3,61 @@ import bcrypt from 'bcryptjs';
 import { generateToken } from '../utils/auth.js';
 
 export const registerUser = async (req, res) => {
-  const { full_name, email, password, aadhar_number, pan_number, user_photo_url } = req.body;
+  const { full_name, email, phone, password, aadhar_number, pan_number, user_photo_url, pan_photo_url, aadhar_photo_url } = req.body;
 
   try {
+    // Check for duplicate email
+    const emailCheck = await pool.query(`SELECT id FROM customers WHERE email = $1`, [email]);
+    if (emailCheck.rows.length > 0) {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+
+    // Check for duplicate phone number
+    const phoneCheck = await pool.query(`SELECT id FROM customers WHERE phone = $1`, [phone]);
+    if (phoneCheck.rows.length > 0) {
+      return res.status(400).json({ message: 'Phone number already exists' });
+    }
+
+    // Check for duplicate Aadhar number
+    const aadharCheck = await pool.query(`SELECT id FROM customers WHERE aadhar_number = $1`, [aadhar_number]);
+    if (aadharCheck.rows.length > 0) {
+      return res.status(400).json({ message: 'Aadhar number already exists' });
+    }
+
+    // Check for duplicate PAN number
+    const panCheck = await pool.query(`SELECT id FROM customers WHERE pan_number = $1`, [pan_number]);
+    if (panCheck.rows.length > 0) {
+      return res.status(400).json({ message: 'PAN number already exists' });
+    }
+
+    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Insert the new customer
     const result = await pool.query(
-      `INSERT INTO customers (full_name, email, password, aadhar_number, pan_number, user_photo, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id`,
-      [full_name, email, hashedPassword, aadhar_number, pan_number, user_photo_url]
+      `INSERT INTO customers (
+        full_name, email, phone, password,
+        aadhar_number, pan_number,
+        user_photo, pan_photo, aadhar_photo,
+        status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending') RETURNING id`,
+      [
+        full_name, email, phone, hashedPassword,
+        aadhar_number, pan_number,
+        user_photo_url, pan_photo_url, aadhar_photo_url
+      ]
     );
 
     const userId = result.rows[0].id;
-    const token = generateToken(userId);
+    const token = generateToken(userId,'customer');
 
-    res.status(201).json({ message: 'Registered successfully', token });
+    res.status(201).cookie('token', token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 1000
+    })
+      .json({ message: 'Registered successfully', token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error during registration' });
@@ -33,25 +73,44 @@ export const loginUser = async (req, res) => {
 
     if (!user) return res.status(404).json({ message: 'User not found' });
 
+    // Check account status
+    if (user.status === 'frozen') {
+      return res.status(403).json({ message: 'Account is frozen. Please contact support.' });
+    }
+    if (user.status === 'deactivated') {
+      return res.status(403).json({ message: 'Account is deactivated.' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ message: 'Invalid password' });
 
-    const token = generateToken(user.id);
-    res.json({ message: 'Login successful', token });
+    const token = generateToken(user.id,'customer');
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 1000
+    })
+      .json({ message: 'Login successful', token });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Login failed' });
+    res.status(500).json({ message: 'Login failed', error: err.message });
   }
 };
+export const logoutUser = (req, res) => {
+  res.clearCookie('token').json({ message: 'Logged out successfully' });
+};
+
 
 export const applyForLoan = async (req, res) => {
-  const { customer_id, loan_amount, loan_type, purpose } = req.body;
+  const{id}=req.user;
+  const { loan_amount, loan_type, purpose } = req.body;
 
   try {
     await pool.query(
       `INSERT INTO loan_applications (customer_id, loan_amount, loan_type, purpose)
        VALUES ($1, $2, $3, $4)`,
-      [customer_id, loan_amount, loan_type, purpose]
+      [id, loan_amount, loan_type, purpose]
     );
 
     res.status(201).json({ message: 'Loan application submitted successfully' });
@@ -116,12 +175,12 @@ export const transferMoney = async (req, res) => {
 };
 //Transaction history
 export const getTransactionHistory = async (req, res) => {
-  const { customer_id } = req.params;
+  const { id } = req.user;
   const { type, start_date, end_date } = req.query;
 
   try {
     let query = 'SELECT * FROM transactions WHERE customer_id = $1';
-    const values = [customer_id];
+    const values = [id];
 
     if (type) {
       values.push(type);
@@ -164,6 +223,12 @@ export const verifyAtmPin = async (req, res) => {
     }
 
     const card = result.rows[0];
+
+    // Check if the card status is 'active'
+    if (card.status !== 'active') {
+      return res.status(403).json({ message: 'Card is not active' });
+    }
+
     const isMatch = await bcrypt.compare(pin, card.hashed_pin);
 
     if (!isMatch) {
@@ -182,6 +247,7 @@ export const verifyAtmPin = async (req, res) => {
     res.status(500).json({ message: 'Error verifying PIN' });
   }
 };
+
 //  Withdraw money
 export const withdrawMoney = async (req, res) => {
   const { account_number, amount } = req.body;
@@ -230,7 +296,7 @@ export const checkBalance = async (req, res) => {
 
   try {
     const accRes = await pool.query(
-      'SELECT balance FROM savings_accounts WHERE account_number = $1',
+      'SELECT balance FROM accounts WHERE account_number = $1',
       [account_number]
     );
 
@@ -287,12 +353,11 @@ export const changeAtmPin = async (req, res) => {
 };
 // Get user account summary
 export const getAccountSummary = async (req, res) => {
-  const { customer_id } = req.user; 
-
+  const { id } = req.user;
   try {
     const result = await pool.query(
-      `SELECT balance, account_number FROM accounts WHERE customer_id = $1`,
-      [customer_id]
+      `SELECT balance, account_number,account_type,status FROM accounts WHERE customer_id = $1`,
+      [id]
     );
     res.status(200).json(result.rows[0]);
   } catch (err) {
@@ -302,12 +367,12 @@ export const getAccountSummary = async (req, res) => {
 };
 
 export const getLoanStatus = async (req, res) => {
-  const { customer_id } = req.user;
+  const { id } = req.user;
 
   try {
     const result = await pool.query(
       `SELECT loan_status, loan_amount, application_date FROM loan_applications WHERE customer_id = $1`,
-      [customer_id]
+      [id]
     );
     res.status(200).json(result.rows);
   } catch (err) {
@@ -315,4 +380,71 @@ export const getLoanStatus = async (req, res) => {
     res.status(500).json({ message: 'Error fetching loan status' });
   }
 };
+export const getUserProfile = async (req, res) => {
+  const { id } = req.user;
+  try {
+    const result = await pool.query(
+      'SELECT id, full_name, email, phone, aadhar_number, pan_number, user_photo, pan_photo, aadhar_photo, status, created_at FROM customers WHERE id = $1',
+      [id]
+    );
 
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.status(200).json({ user: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching user profile', error: err.message });
+  }
+};
+// Generate ATM card
+export const generateCard = async (req, res) => {
+  const { id } = req.user;
+  const { pin } = req.body;
+
+  try {
+    // Step 1: Get account_id from customer_id
+    const accountResult = await pool.query(
+      'SELECT id FROM accounts WHERE customer_id = $1',
+      [id]
+    );
+
+    if (accountResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No account found for this customer' });
+    }
+
+    const account_id = accountResult.rows[0].id;
+
+    // Step 2: Check if a card already exists
+    const existingCard = await pool.query(
+      'SELECT * FROM atm_cards WHERE account_id = $1',
+      [account_id]
+    );
+
+    if (existingCard.rows.length > 0) {
+      return res.status(400).json({ error: 'ATM card already exists for this account' });
+    }
+
+    // Step 3: Create new card
+    const cardNumber = Math.floor(1000000000000000 + Math.random() * 9000000000000000);
+    const hashedPin = await bcrypt.hash(pin, 10);
+    const expiryDate = new Date();
+    expiryDate.setFullYear(expiryDate.getFullYear() + 5);
+
+    const result = await pool.query(
+      `INSERT INTO atm_cards (account_id, card_number, hashed_pin, expiry_date)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [account_id, cardNumber, hashedPin, expiryDate]
+    );
+
+    res.status(201).json({
+      message: 'ATM card generated successfully',
+      card: result.rows[0],
+    });
+
+  } catch (err) {
+    console.error('Error generating ATM card:', err);
+    res.status(500).json({ error: 'Card generation failed' });
+  }
+};

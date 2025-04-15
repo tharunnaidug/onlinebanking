@@ -1,11 +1,10 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
-
+import cookieParser from 'cookie-parser';
 import userRoutes from './routes/userRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import setupRoutes from './utils/setup.js';
-import authRoutes from './routes/authRoutes.js';
 import transferRoutes from './routes/transferRoutes.js';
 
 dotenv.config();
@@ -13,11 +12,12 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', setupRoutes);
-app.use("/api/auth", authRoutes);
 app.use("/api/transfer", transferRoutes);
 
 
