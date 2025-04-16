@@ -5,7 +5,6 @@ import cookieParser from 'cookie-parser';
 import userRoutes from './routes/userRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import setupRoutes from './utils/setup.js';
-import transferRoutes from './routes/transferRoutes.js';
 
 dotenv.config();
 const app = express();
@@ -18,7 +17,6 @@ app.use(cookieParser());
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', setupRoutes);
-app.use("/api/transfer", transferRoutes);
 
 
 app.get('/', (req, res) => {
