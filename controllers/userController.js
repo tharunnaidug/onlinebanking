@@ -122,7 +122,7 @@ export const applyForLoan = async (req, res) => {
 };
 
 export const transferMoney = async (req, res) => {
-  const { from_customer_id, to_account_number, amount } = req.body;
+  const { from_account_number, to_account_number, amount } = req.body;
 
   if (!amount || amount <= 0) {
     return res.status(400).json({ message: 'Invalid amount. Must be greater than ₹0' });
@@ -133,37 +133,61 @@ export const transferMoney = async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Get sender's account
-    const senderRes = await client.query('SELECT * FROM accounts WHERE customer_id = $1 FOR UPDATE', [from_customer_id]);
+    // Fetch sender account
+    const senderRes = await client.query(
+      'SELECT * FROM accounts WHERE account_number = $1 FOR UPDATE',
+      [from_account_number]
+    );
     const sender = senderRes.rows[0];
-    if (!sender) return res.status(404).json({ message: 'Sender account not found' });
+    if (!sender) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Sender account not found' });
+    }
 
-    if (sender.balance < amount) {
+    if (parseFloat(sender.balance) < amount) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
-    // Get receiver's account
-    const receiverRes = await client.query('SELECT * FROM accounts WHERE account_number = $1 FOR UPDATE', [to_account_number]);
+    // Fetch receiver account
+    const receiverRes = await client.query(
+      'SELECT * FROM accounts WHERE account_number = $1 FOR UPDATE',
+      [to_account_number]
+    );
     const receiver = receiverRes.rows[0];
-    if (!receiver) return res.status(404).json({ message: 'Receiver account not found' });
+    if (!receiver) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Receiver account not found' });
+    }
 
-    // Perform balance updates
-    await client.query('UPDATE accounts SET balance = balance - $1 WHERE customer_id = $2', [amount, from_customer_id]);
-    await client.query('UPDATE accounts SET balance = balance + $1 WHERE account_number = $2', [amount, to_account_number]);
-
-    // Log transactions
+    // Update balances
     await client.query(
-      'INSERT INTO transactions (customer_id, transaction_type, amount, transaction_date) VALUES ($1, $2, $3, NOW())',
-      [from_customer_id, 'debit', amount]
+      'UPDATE accounts SET balance = balance - $1 WHERE account_number = $2',
+      [amount, from_account_number]
     );
 
     await client.query(
-      'INSERT INTO transactions (customer_id, transaction_type, amount, transaction_date) VALUES ($1, $2, $3, NOW())',
-      [receiver.customer_id, 'credit', amount]
+      'UPDATE accounts SET balance = balance + $1 WHERE account_number = $2',
+      [amount, to_account_number]
+    );
+
+    // Insert sender transaction (debit)
+    await client.query(
+      'INSERT INTO transactions (from_account, to_account, amount, transaction_type, customer_id,type) VALUES ($1, $2, $3, $4, $5,$6)',
+      [from_account_number, to_account_number, amount, 'debit', sender.customer_id,"CARD"]
+    );
+
+    // Insert receiver transaction (credit)
+    await client.query(
+      'INSERT INTO transactions (from_account, to_account, amount, transaction_type, customer_id,type) VALUES ($1, $2, $3, $4, $5,$6)',
+      [from_account_number, to_account_number, amount, 'credit', receiver.customer_id,"CARD"]
     );
 
     await client.query('COMMIT');
-    res.status(200).json({ message: `₹${amount} transferred successfully to account ${to_account_number}` });
+
+    res.status(200).json({
+      message: `₹${amount} transferred successfully from ${from_account_number} to ${to_account_number}`,
+    });
 
   } catch (err) {
     await client.query('ROLLBACK');
@@ -173,6 +197,7 @@ export const transferMoney = async (req, res) => {
     client.release();
   }
 };
+
 //Transaction history
 export const getTransactionHistory = async (req, res) => {
   const { id } = req.user;
@@ -255,7 +280,7 @@ export const withdrawMoney = async (req, res) => {
   try {
     // Get account balance
     const accRes = await pool.query(
-      'SELECT * FROM savings_accounts WHERE account_number = $1',
+      'SELECT * FROM accounts WHERE account_number = $1',
       [account_number]
     );
 
@@ -273,14 +298,14 @@ export const withdrawMoney = async (req, res) => {
     const newBalance = account.balance - amount;
 
     await pool.query(
-      'UPDATE savings_accounts SET balance = $1 WHERE account_number = $2',
+      'UPDATE accounts SET balance = $1 WHERE account_number = $2',
       [newBalance, account_number]
     );
 
     // Add transaction log
     await pool.query(
-      'INSERT INTO transactions (customer_id, transaction_type, amount, transaction_date) VALUES ($1, $2, $3, NOW())',
-      [account.customer_id, 'debit', amount]
+      'INSERT INTO transactions (customer_id, transaction_type, amount,type, transaction_date) VALUES ($1, $2, $3,$4, NOW())',
+      [account.customer_id, 'debit', amount,"WITHDRAW"]
     );
 
     res.status(200).json({ message: `₹${amount} withdrawn successfully`, balance: newBalance });

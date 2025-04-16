@@ -13,8 +13,6 @@ router.post('/login', loginUser);//
 
 router.post('/applyforloan', protect, customerOnly, applyForLoan);//
 
-router.post('/transfer', protect, customerOnly, checkTransactionLimit, transferMoney);
-
 router.post('/verifypin', protect, customerOnly, verifyAtmPin);//
 
 router.post('/changepin', protect, customerOnly, changeAtmPin);//
@@ -33,9 +31,10 @@ router.get('/profile', protect, customerOnly, getUserProfile);//
 
 router.get('/balance',protect, customerOnly, checkBalance);//
 
-router.get('/logout',logoutUser);
+router.get('/logout',logoutUser);//
 
 // These APIs should only be accessible after PIN verification 
-router.post('/withdraw',protect, customerOnly, checkTransactionLimit, withdrawMoney);
+router.post('/withdraw',protect, customerOnly, checkTransactionLimit, withdrawMoney);//
+router.post('/transfer', protect, customerOnly, checkTransactionLimit, transferMoney);//
 
 export default router;
